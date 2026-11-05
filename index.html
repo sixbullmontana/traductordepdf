@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Traductor de PDF</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📄</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef1f4;--panel:#fff;--ink:#14213d;--muted:#5b6678;--line:#d5dbe3;--accent:#0f6d8c;--accent-ink:#fff;--warn:#8a4b00;--warnbg:#fff3e0;--err:#a31d1d}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0f1722;--panel:#18222f;--ink:#e6ebf2;--muted:#9aa7b8;--line:#2c3a4b;--accent:#4cb4d6;--accent-ink:#06202b;--warn:#ffcf8a;--warnbg:#3a2a10;--err:#ff8a8a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "IBM Plex Sans",system-ui,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:1100px;margin:0 auto;padding:24px 16px 64px}
+h1{font:600 clamp(28px,5vw,40px)/1.1 Newsreader,Georgia,serif;margin:8px 0 6px}
+.sub{color:var(--muted);margin:0 0 24px;max-width:60ch}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+label{display:block;font-weight:500;font-size:14px;margin-bottom:4px}
+select,input[type=text],input[type=password],input[type=email]{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+select:focus,input:focus,textarea:focus,button:focus-visible,.drop:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hint{font-size:13px;color:var(--muted);margin-top:4px}
+.drop{border:2px dashed var(--line);border-radius:10px;padding:34px 16px;text-align:center;cursor:pointer;background:var(--panel);transition:border-color .15s,background .15s}
+.drop.over{border-color:var(--accent);background:var(--bg)}
+.drop strong{font:600 20px Newsreader,Georgia,serif;display:block}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+button{font:inherit;font-weight:500;padding:10px 16px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:10px 0 4px}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.msg{padding:10px 12px;border-radius:6px;background:var(--warnbg);color:var(--warn);font-size:14px;margin-top:10px}
+.msg.err{color:var(--err)}
+.hidden{display:none!important}
+.page{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+@media(max-width:700px){.page{grid-template-columns:1fr}}
+.page h3{font-size:14px;font-weight:600;color:var(--muted);margin:0 0 6px}
+.src,.dst{width:100%;min-height:220px;border:1px solid var(--line);border-radius:6px;padding:12px;font:16px/1.6 Newsreader,Georgia,serif;white-space:pre-wrap;background:var(--panel);color:var(--ink);resize:vertical}
+.src{background:var(--bg);overflow:auto;max-height:420px}
+#printArea{display:none}
+@media print{body>*:not(#printArea){display:none!important}#printArea{display:block;font:12pt/1.5 Georgia,serif;color:#000}#printArea .pg{page-break-after:always;white-space:pre-wrap}}
+</style>
+</head>
+<body>
+<main>
+<h1>Traductor de PDF</h1>
+<p class="sub">Sube un PDF, elige el idioma, revisa la traducción página por página y descárgala. Todo se procesa en tu navegador; el texto solo se envía al motor de traducción que elijas.</p>
+
+<section class="card">
+  <div class="grid">
+    <div><label for="from">Idioma original</label><select id="from"></select></div>
+    <div><label for="to">Traducir a</label><select id="to"></select></div>
+    <div><label for="engine">Motor de traducción</label>
+      <select id="engine">
+        <option value="mymemory">MyMemory (gratis, sin clave)</option>
+        <option value="claude">Claude (mejor calidad, requiere clave)</option>
+        <option value="google">Google Cloud Translation (requiere clave)</option>
+      </select></div>
+  </div>
+  <div id="optMy" class="grid" style="margin-top:14px">
+    <div><label for="email">Correo (opcional)</label><input type="email" id="email" placeholder="tu@correo.com" autocomplete="email">
+      <div class="hint">Con correo, MyMemory sube el límite diario gratuito de 5,000 a 50,000 caracteres.</div></div>
+  </div>
+  <div id="optKey" class="grid hidden" style="margin-top:14px">
+    <div><label for="key">Clave de API</label><input type="password" id="key" autocomplete="off">
+      <div class="hint">Se guarda solo en este navegador si marcas la casilla.</div>
+      <label style="font-weight:400;margin-top:6px"><input type="checkbox" id="remember"> Recordar la clave en este navegador</label></div>
+  </div>
+</section>
+
+<div class="drop" id="drop" tabindex="0" role="button" aria-label="Seleccionar archivo PDF">
+  <strong>Arrastra tu PDF aquí</strong>
+  <span>o haz clic para elegirlo</span>
+  <input type="file" id="file" accept="application/pdf" hidden>
+</div>
+<div id="fileInfo" class="hint" style="margin:8px 0 16px"></div>
+
+<div class="row" style="margin-bottom:12px">
+  <button class="primary" id="go" disabled>Traducir</button>
+  <button id="stop" class="hidden">Cancelar</button>
+</div>
+<div id="status" class="hidden card">
+  <div id="statusTxt"></div>
+  <div class="bar"><i id="barFill"></i></div>
+</div>
+<div id="alert" class="msg hidden"></div>
+
+<section id="result" class="hidden">
+  <div class="card row" style="justify-content:space-between">
+    <span>Puedes corregir cualquier texto antes de descargar.</span>
+    <span class="row">
+      <button class="primary" id="dlPdf">Descargar PDF</button>
+      <button id="dlTxt">Descargar TXT</button>
+      <button id="dlPrint" title="Útil para idiomas como chino, árabe o ruso">Imprimir / Guardar PDF</button>
+    </span>
+  </div>
+  <div id="pages"></div>
+</section>
+</main>
+<div id="printArea"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const $=id=>document.getElementById(id);
+const LANGS={es:'Español',en:'Inglés',fr:'Francés',de:'Alemán',it:'Italiano',pt:'Portugués',ca:'Catalán',nl:'Neerlandés',pl:'Polaco',ru:'Ruso','zh-CN':'Chino (simplificado)',ja:'Japonés',ko:'Coreano',ar:'Árabe'};
+const NONLATIN=['ru','zh-CN','ja','ko','ar'];
+let pdfFile=null,pagesText=[],cancelled=false,baseName='documento';
+
+$('from').innerHTML='<option value="auto">Detectar automáticamente</option>'+Object.entries(LANGS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+$('to').innerHTML=Object.entries(LANGS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+$('to').value='es';
+
+// preferencias guardadas (try/catch: el almacenamiento puede no estar disponible)
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
+['from','to','engine'].forEach(id=>{const v=store.get('pt_'+id);if(v&&[...$(id).options].some(o=>o.value===v))$(id).value=v;$(id).addEventListener('change',()=>{store.set('pt_'+id,$(id).value);syncEngine()})});
+$('email').value=store.get('pt_email')||'';
+$('email').addEventListener('change',()=>store.set('pt_email',$('email').value));
+function syncEngine(){
+  const e=$('engine').value;
+  $('optMy').classList.toggle('hidden',e!=='mymemory');
+  $('optKey').classList.toggle('hidden',e==='mymemory');
+  const k=store.get('pt_key_'+e);$('key').value=k||'';$('remember').checked=!!k;
+}
+syncEngine();
+
+// selección de archivo
+const drop=$('drop');
+drop.onclick=()=>$('file').click();
+drop.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('file').click()}};
+['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over')}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
+drop.addEventListener('drop',e=>setFile(e.dataTransfer.files[0]));
+$('file').onchange=e=>setFile(e.target.files[0]);
+function setFile(f){
+  if(!f)return;
+  if(f.type!=='application/pdf'&&!/\.pdf$/i.test(f.name)){return showAlert('El archivo debe ser un PDF.',true)}
+  pdfFile=f;baseName=f.name.replace(/\.pdf$/i,'');
+  $('fileInfo').textContent=`${f.name} · ${(f.size/1048576).toFixed(2)} MB`;
+  $('go').disabled=false;hideAlert();$('result').classList.add('hidden');
+}
+function showAlert(t,err){const a=$('alert');a.textContent=t;a.classList.toggle('err',!!err);a.classList.remove('hidden')}
+function hideAlert(){$('alert').classList.add('hidden')}
+function setProgress(txt,p){$('status').classList.remove('hidden');$('statusTxt').textContent=txt;$('barFill').style.width=Math.round(p*100)+'%'}
+
+// extracción de texto con agrupación en líneas y párrafos
+async function extract(file){
+  const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;
+  const out=[];
+  for(let n=1;n<=pdf.numPages;n++){
+    if(cancelled)throw new Error('cancel');
+    setProgress(`Leyendo página ${n} de ${pdf.numPages}…`,n/pdf.numPages*0.15);
+    const items=(await (await pdf.getPage(n)).getTextContent()).items.filter(i=>i.str.trim()||i.hasEOL);
+    const lines=[];
+    items.forEach(it=>{
+      const y=it.transform[5],h=Math.abs(it.transform[3])||10;
+      let L=lines.find(l=>Math.abs(l.y-y)<h*0.4);
+      if(!L){L={y,h,parts:[]};lines.push(L)}
+      L.parts.push({x:it.transform[4],s:it.str});
+    });
+    lines.sort((a,b)=>b.y-a.y);
+    const paras=[];let cur='',prev=null;
+    lines.forEach(L=>{
+      L.parts.sort((a,b)=>a.x-b.x);
+      const t=L.parts.map(p=>p.s).join(' ').replace(/\s+/g,' ').trim();
+      if(!t)return;
+      const gap=prev?prev.y-L.y:0;
+      if(prev&&gap>Math.max(L.h,prev.h)*1.6){paras.push(cur);cur=t}
+      else if(cur&&/-$/.test(cur)&&/^[a-zà-ÿ]/.test(t))cur=cur.slice(0,-1)+t;
+      else cur=cur?cur+' '+t:t;
+      prev=L;
+    });
+    if(cur)paras.push(cur);
+    out.push(paras);
+  }
+  return out;
+}
+
+// motores de traducción
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function splitLong(t,max){
+  if(t.length<=max)return [t];
+  const parts=t.match(/[^.!?。]+[.!?。]*\s*/g)||[t],res=[];let c='';
+  parts.forEach(p=>{while(p.length>max){if(c){res.push(c);c=''}res.push(p.slice(0,max));p=p.slice(max)}
+    if((c+p).length>max){res.push(c);c=p}else c+=p});
+  if(c)res.push(c);return res;
+}
+async function tMyMemory(arr,from,to){
+  const res=[];
+  for(const p of arr){
+    let acc=[];
+    for(const chunk of splitLong(p,450)){
+      if(cancelled)throw new Error('cancel');
+      const u=new URL('https://api.mymemory.translated.net/get');
+      u.searchParams.set('q',chunk);
+      u.searchParams.set('langpair',(from==='auto'?'Autodetect':from)+'|'+to);
+      if($('email').value)u.searchParams.set('de',$('email').value);
+      const r=await fetch(u);const j=await r.json();
+      if(j.responseStatus==429||/QUOTA|LIMIT/i.test(j.responseDetails||''))throw new Error('Se alcanzó el límite diario gratuito de MyMemory. Agrega tu correo, usa otro motor o inténtalo mañana.');
+      if(j.responseStatus!=200)throw new Error('MyMemory: '+(j.responseDetails||'error desconocido'));
+      acc.push(j.responseData.translatedText);
+      await sleep(150);
+    }
+    res.push(acc.join(' '));
+  }
+  return res;
+}
+async function tGoogle(arr,from,to,key){
+  const body={q:arr,target:to.split('-')[0]==='zh'?'zh-CN':to,format:'text'};
+  if(from!=='auto')body.source=from;
+  const r=await fetch('https://translation.googleapis.com/language/translate/v2?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  if(!r.ok)throw new Error('Google: '+(j.error?.message||r.status));
+  return j.data.translations.map(t=>t.translatedText);
+}
+async function tClaude(arr,from,to,key){
+  const src=from==='auto'?'the source language (auto-detect it)':LANGS[from];
+  const prompt=`Translate each string in the JSON array below from ${src} into ${LANGS[to]}. Keep numbers, names, URLs and proper nouns intact, preserve the register and meaning, and fix words broken by PDF extraction. Return ONLY a JSON array of strings with exactly ${arr.length} items, in the same order, with no extra text.\n\n${JSON.stringify(arr)}`;
+  const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-5-5',max_tokens:8000,messages:[{role:'user',content:prompt}]})});
+  const j=await r.json();
+  if(!r.ok)throw new Error('Claude: '+(j.error?.message||r.status));
+  const txt=j.content.filter(c=>c.type==='text').map(c=>c.text).join('');
+  const m=txt.match(/\[[\s\S]*\]/);
+  const parsed=JSON.parse(m?m[0]:txt);
+  if(!Array.isArray(parsed)||parsed.length!==arr.length)throw new Error('Claude devolvió un formato inesperado.');
+  return parsed.map(String);
+}
+async function translateBatch(arr,from,to){
+  const e=$('engine').value,key=$('key').value.trim();
+  if(e!=='mymemory'&&!key)throw new Error('Falta la clave de API para el motor seleccionado.');
+  if(e==='mymemory')return tMyMemory(arr,from,to);
+  for(let i=0;;i++){
+    try{return await(e==='google'?tGoogle:tClaude)(arr,from,to,key)}
+    catch(err){if(i>=1||err.message==='cancel'||/clave|key|auth|permission/i.test(err.message))throw err;await sleep(1500)}
+  }
+}
+
+// flujo principal
+$('go').onclick=async()=>{
+  hideAlert();cancelled=false;
+  $('go').disabled=true;$('stop').classList.remove('hidden');$('result').classList.add('hidden');
+  const e=$('engine').value;
+  if(e!=='mymemory'){if($('remember').checked)store.set('pt_key_'+e,$('key').value.trim());else store.del('pt_key_'+e)}
+  try{
+    const src=await extract(pdfFile);
+    const total=src.reduce((s,p)=>s+p.join('').length,0);
+    if(total<20)throw new Error('Este PDF no contiene texto seleccionable (parece escaneado). Esta herramienta no incluye OCR; convierte el PDF con OCR primero.');
+    const from=$('from').value,to=$('to').value,max=e==='mymemory'?1:2800;
+    const out=src.map(p=>p.map(()=>''));
+    let done=0;
+    for(let pi=0;pi<src.length;pi++){
+      let batch=[],idx=[],size=0;
+      const flush=async()=>{
+        if(!batch.length)return;
+        if(cancelled)throw new Error('cancel');
+        const tr=await translateBatch(batch,from,to);
+        tr.forEach((t,k)=>out[pi][idx[k]]=t);
+        batch=[];idx=[];size=0;
+      };
+      for(let k=0;k<src[pi].length;k++){
+        const t=src[pi][k];
+        if(e!=='mymemory'&&size+t.length>max)await flush();
+        batch.push(t);idx.push(k);size+=t.length;
+        if(e==='mymemory')await flush();
+        done+=t.length;
+        setProgress(`Traduciendo página ${pi+1} de ${src.length}…`,0.15+0.85*done/total);
+      }
+      await flush();
+    }
+    pagesText=src;render(src,out);
+    setProgress('Traducción terminada.',1);
+  }catch(err){
+    if(err.message==='cancel')showAlert('Traducción cancelada.');
+    else showAlert(err.message||String(err),true);
+  }finally{$('go').disabled=false;$('stop').classList.add('hidden')}
+};
+$('stop').onclick=()=>{cancelled=true};
+
+function render(src,out){
+  const box=$('pages');box.innerHTML='';
+  src.forEach((p,i)=>{
+    const d=document.createElement('div');d.className='card';
+    d.innerHTML=`<div class="page"><div><h3>Original · página ${i+1}</h3><div class="src"></div></div><div><h3>Traducción · página ${i+1}</h3><textarea class="dst" aria-label="Traducción de la página ${i+1}"></textarea></div></div>`;
+    d.querySelector('.src').textContent=p.join('\n\n');
+    d.querySelector('.dst').value=out[i].join('\n\n');
+    box.appendChild(d);
+  });
+  $('result').classList.remove('hidden');
+  $('result').scrollIntoView({behavior:'smooth'});
+}
+const getPages=()=>[...document.querySelectorAll('.dst')].map(t=>t.value.trim());
+function save(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000)}
+
+$('dlTxt').onclick=()=>save(new Blob([getPages().map((t,i)=>`--- Página ${i+1} ---\n\n${t}`).join('\n\n')],{type:'text/plain;charset=utf-8'}),`${baseName}_${$('to').value}.txt`);
+
+$('dlPdf').onclick=()=>{
+  if(NONLATIN.includes($('to').value))return showAlert('El PDF directo solo admite idiomas con alfabeto latino. Para este idioma usa "Imprimir / Guardar PDF".',true);
+  const doc=new jspdf.jsPDF({unit:'mm',format:'a4'});
+  const W=210,M=20,LH=6;let first=true;
+  doc.setFont('helvetica','normal');doc.setFontSize(11);
+  getPages().forEach((t,i)=>{
+    if(!first)doc.addPage();first=false;
+    let y=M;
+    t.split(/\n\s*\n/).forEach(par=>{
+      const lines=doc.splitTextToSize(par.replace(/\s+/g,' ').replace(/[^\u0020-\u007E\u00A0-\u00FF\u2018\u2019\u201C\u201D\u2013\u2014\u2022\u20AC]/g,'?'),W-2*M);
+      lines.forEach(l=>{if(y>297-M){doc.addPage();y=M}doc.text(l,M,y);y+=LH});
+      y+=LH*0.6;
+    });
+    doc.setFontSize(9);doc.setTextColor(130);doc.text(String(i+1),W/2,290,{align:'center'});doc.setTextColor(0);doc.setFontSize(11);
+  });
+  doc.save(`${baseName}_${$('to').value}.pdf`);
+};
+
+$('dlPrint').onclick=()=>{
+  const pa=$('printArea');pa.innerHTML='';
+  pa.dir=$('to').value==='ar'?'rtl':'ltr';
+  getPages().forEach(t=>{const d=document.createElement('div');d.className='pg';d.textContent=t;pa.appendChild(d)});
+  document.title=`${baseName}_${$('to').value}`;
+  window.print();
+};
+</script>
+</body>
+</html>
