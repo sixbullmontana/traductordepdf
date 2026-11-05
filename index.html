@@ -17,7 +17,7 @@ h1{font:600 clamp(28px,5vw,40px)/1.1 Newsreader,Georgia,serif;margin:8px 0 6px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
 label{display:block;font-weight:500;font-size:14px;margin-bottom:4px}
-select,input[type=text],input[type=password],input[type=email]{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+select,input[type=number],input[type=text],input[type=password],input[type=email]{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
 select:focus,input:focus,textarea:focus,button:focus-visible,.drop:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .hint{font-size:13px;color:var(--muted);margin-top:4px}
 .drop{border:2px dashed var(--line);border-radius:10px;padding:34px 16px;text-align:center;cursor:pointer;background:var(--panel);transition:border-color .15s,background .15s}
@@ -52,12 +52,14 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <div><label for="to">Traducir a</label><select id="to"></select></div>
     <div><label for="engine">Motor de traducción</label>
       <select id="engine">
-        <option value="mymemory">MyMemory (gratis, sin clave)</option>
-        <option value="claude">Claude (mejor calidad, requiere clave)</option>
-        <option value="google">Google Cloud Translation (requiere clave)</option>
-      </select></div>
+        <option value="local">Local en tu navegador (gratis e ilimitado)</option>
+        <option value="chrome">Traductor integrado de Chrome (gratis e ilimitado)</option>
+        <option value="mymemory">MyMemory (gratis, con límite diario)</option>
+        <option value="claude">Claude (de pago, requiere clave)</option>
+        <option value="google">Google Cloud Translation (de pago, requiere clave)</option>
+      </select><div class="hint" id="engHint"></div></div>
   </div>
-  <div class="grid" style="margin-top:14px"><div><label for="ocr">OCR (PDF escaneados o con imágenes)</label><select id="ocr"><option value="auto">Automático en páginas sin texto</option><option value="off">Desactivado</option><option value="force">Forzar en todas las páginas</option></select><div class="hint">La primera vez descarga datos del idioma; el OCR es lento y puede cometer errores.</div></div></div>
+  <div class="grid" style="margin-top:14px"><div><label for="ocr">OCR (PDF escaneados o con imágenes)</label><select id="ocr"><option value="auto">Automático en páginas sin texto</option><option value="off">Desactivado</option><option value="force">Forzar en todas las páginas</option></select><div class="hint">La primera vez descarga datos del idioma; el OCR es lento y puede cometer errores.</div></div><div><label for="p1">Desde la página</label><input type="number" id="p1" min="1" placeholder="1"><div class="hint">Para libros, traduce por capítulos.</div></div><div><label for="p2">Hasta la página</label><input type="number" id="p2" min="1" placeholder="última"></div></div>
   <div id="optMy" class="grid" style="margin-top:14px">
     <div><label for="email">Correo (opcional)</label><input type="email" id="email" placeholder="tu@correo.com" autocomplete="email">
       <div class="hint">Con correo, MyMemory sube el límite diario gratuito de 5,000 a 50,000 caracteres.</div></div>
@@ -79,6 +81,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 <div class="row" style="margin-bottom:12px">
   <button class="primary" id="go" disabled>Traducir</button>
   <button id="stop" class="hidden">Cancelar</button>
+  <button id="clr" title="Borra lo ya traducido que se guarda para reanudar">Borrar memoria de traducciones</button>
 </div>
 <div id="status" class="hidden card">
   <div id="statusTxt"></div>
@@ -114,10 +117,11 @@ const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},se
 ['from','to','engine'].forEach(id=>{const v=store.get('pt_'+id);if(v&&[...$(id).options].some(o=>o.value===v))$(id).value=v;$(id).addEventListener('change',()=>{store.set('pt_'+id,$(id).value);syncEngine()})});
 $('email').value=store.get('pt_email')||'';
 $('email').addEventListener('change',()=>store.set('pt_email',$('email').value));
+const HINTS={local:"Gratis e ilimitado. Corre en tu equipo: descarga un modelo (100 a 300 MB) la primera vez, lo guarda y luego funciona sin conexión. Calidad media y lento; sirve para libros.",chrome:"Gratis e ilimitado con el traductor integrado de Chrome de escritorio. Suele ser más rápido y de mejor calidad. Descarga el idioma la primera vez.",mymemory:"Tiene límite diario: no alcanza para libros completos.",claude:"De pago por uso con tu propia clave.",google:"De pago por uso con tu propia clave."};
 function syncEngine(){
   const e=$('engine').value;
   $('optMy').classList.toggle('hidden',e!=='mymemory');
-  $('optKey').classList.toggle('hidden',e==='mymemory');
+  $('optKey').classList.toggle('hidden',e!=='claude'&&e!=='google');$('engHint').textContent=HINTS[e]||'';
   const k=store.get('pt_key_'+e);$('key').value=k||'';$('remember').checked=!!k;
 }
 syncEngine();
@@ -177,10 +181,10 @@ function blocksFromText(items,vh){
 }
 async function extractDoc(file,label){
   const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;
-  const mode=$('ocr').value,pages=[];let worker=null;
-  for(let n=1;n<=pdf.numPages;n++){
+  const mode=$('ocr').value,pages=[],a=Math.max(1,+$('p1').value||1),z=Math.min(pdf.numPages,+$('p2').value||pdf.numPages);let worker=null;
+  for(let n=a;n<=z;n++){
     if(cancelled)throw new Error('cancel');
-    setProgress(`${label}: leyendo página ${n} de ${pdf.numPages}…`,0.3*n/pdf.numPages);
+    setProgress(`${label}: leyendo página ${n} de ${pdf.numPages}…`,0.3*(n-a+1)/(z-a+1));
     const pg=await pdf.getPage(n),vp=pg.getViewport({scale:1});
     let blocks=[];
     if(mode!=='force')blocks=blocksFromText((await pg.getTextContent()).items,vp.height);
@@ -190,7 +194,7 @@ async function extractDoc(file,label){
       const ps=data.blocks?data.blocks.flatMap(b=>b.paragraphs):(data.paragraphs||[]);
       blocks=ps.filter(p=>p.text.trim()).map(p=>{const b=p.bbox,nl=Math.max(1,(p.lines||[]).length),h=(b.y1-b.y0)/S;return{x:b.x0/S,y:b.y0/S,w:(b.x1-b.x0)/S,h,fs:h/nl*0.8,t:p.text.replace(/\s+/g,' ').trim()}});
     }
-    pages.push({w:vp.width,h:vp.height,blocks});
+    pages.push({pn:n,w:vp.width,h:vp.height,blocks});
   }
   if(worker)await worker.terminate();
   return{pdf,pages};
@@ -245,19 +249,85 @@ async function tClaude(arr,from,to,key){
   if(!Array.isArray(parsed)||parsed.length!==arr.length)throw new Error('Claude devolvió un formato inesperado.');
   return parsed.map(String);
 }
-async function translateBatch(arr,from,to){
+async function translateBatchRaw(arr,from,to){
   const e=$('engine').value,key=$('key').value.trim();
-  if(e!=='mymemory'&&!key)throw new Error('Falta la clave de API para el motor seleccionado.');
+  if((e==='claude'||e==='google')&&!key)throw new Error('Falta la clave de API para el motor seleccionado.');
   if(e==='mymemory')return tMyMemory(arr,from,to);
+  if(e==='local')return tLocal(arr,from,to);
+  if(e==='chrome')return tChrome(arr,from,to);
   for(let i=0;;i++){
     try{return await(e==='google'?tGoogle:tClaude)(arr,from,to,key)}
     catch(err){if(i>=1||err.message==='cancel'||/clave|key|auth|permission/i.test(err.message))throw err;await sleep(1500)}
   }
 }
 
+// motores gratuitos que se ejecutan en tu equipo
+const fmt=s=>s>3600?Math.floor(s/3600)+' h '+Math.round(s%3600/60)+' min':s>60?Math.round(s/60)+' min':Math.round(s)+' s';
+const toEn={es:'es-en',fr:'fr-en',de:'de-en',it:'it-en',ru:'ru-en','zh-CN':'zh-en',ja:'ja-en',ar:'ar-en',nl:'nl-en',pt:'ROMANCE-en',ca:'ROMANCE-en'};
+const fromEn={es:['en-es',''],fr:['en-fr',''],de:['en-de',''],it:['en-it',''],ru:['en-ru',''],'zh-CN':['en-zh','>>cmn_Hans<< '],ja:['en-jap',''],ar:['en-ar',''],nl:['en-nl',''],pt:['en-ROMANCE','>>pt<< '],ca:['en-ROMANCE','>>ca<< ']};
+let TJS=null;const pipes={};
+async function getPipe(name){
+  if(pipes[name])return pipes[name];
+  if(!TJS){TJS=await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');TJS.env.allowLocalModels=false;TJS.env.backends.onnx.wasm.proxy=true}
+  try{
+    return pipes[name]=await TJS.pipeline('translation','Xenova/opus-mt-'+name,{progress_callback:p=>{if(p.status==='progress')setProgress(`Descargando modelo ${name}: ${Math.round(p.progress)}% (solo la primera vez)`)}});
+  }catch(e){throw new Error(`No se pudo cargar el modelo ${name} (revisa tu conexión o prueba otro par de idiomas).`)}
+}
+async function runModel(name,prefix,texts){
+  const pipe=await getPipe(name),out=[];
+  for(const t of texts){
+    if(cancelled)throw new Error('cancel');
+    out.push((await pipe(prefix+t,{max_length:512,num_beams:2}))[0].translation_text);
+  }
+  return out;
+}
+async function tLocal(arr,from,to){
+  if(from==='auto')throw new Error('Con el motor local elige el idioma original; no se detecta solo.');
+  if(from!=='en'&&!toEn[from])throw new Error(`El motor local no admite ${LANGS[from]} como idioma original. Usa el traductor de Chrome.`);
+  if(to!=='en'&&!fromEn[to])throw new Error(`El motor local no admite traducir a ${LANGS[to]}. Usa el traductor de Chrome.`);
+  const out=[];
+  for(const p of arr){
+    let c=splitLong(p,400);
+    if(from!=='en')c=await runModel(toEn[from],'',c);
+    if(to!=='en')c=await runModel(fromEn[to][0],fromEn[to][1],c);
+    out.push(c.join(' '));
+  }
+  return out;
+}
+const chromeT={};
+async function getChrome(from,to){
+  if(!('Translator' in self))throw new Error('Este navegador no incluye el traductor integrado (requiere Chrome de escritorio reciente). Usa el motor local.');
+  if(from==='auto')throw new Error('Con este motor elige el idioma original.');
+  const l=c=>c.split('-')[0],k=from+'>'+to,o={sourceLanguage:l(from),targetLanguage:l(to)};
+  if(chromeT[k])return chromeT[k];
+  if(await Translator.availability(o)==='unavailable')throw new Error('Chrome no admite este par de idiomas.');
+  return chromeT[k]=await Translator.create({...o,monitor(m){m.addEventListener('downloadprogress',e=>setProgress(`Descargando idioma: ${Math.round(e.loaded*100)}%`))}});
+}
+async function tChrome(arr,from,to){
+  const t=await getChrome(from,to),out=[];
+  for(const p of arr){if(cancelled)throw new Error('cancel');out.push(await t.translate(p))}
+  return out;
+}
+
+// memoria persistente: lo ya traducido no se repite si cierras o reintentas
+let _db=null;
+const db=()=>_db||(_db=new Promise((res,rej)=>{const r=indexedDB.open('pdf-traductor',1);r.onupgradeneeded=()=>r.result.createObjectStore('tr');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}));
+async function cget(k){try{const d=await db();return await new Promise(r=>{const q=d.transaction('tr').objectStore('tr').get(k);q.onsuccess=()=>r(q.result);q.onerror=()=>r()})}catch(e){}}
+async function cput(k,v){try{(await db()).transaction('tr','readwrite').objectStore('tr').put(v,k)}catch(e){}}
+async function translateBatch(arr,from,to){
+  const pre=`${$('engine').value}|${from}|${to}|`,res=[],miss=[];
+  for(let i=0;i<arr.length;i++){const c=await cget(pre+arr[i]);if(c!=null)res[i]=c;else miss.push(i)}
+  if(miss.length){
+    const tr=await translateBatchRaw(miss.map(i=>arr[i]),from,to);
+    miss.forEach((i,k)=>{res[i]=tr[k];cput(pre+arr[i],tr[k])});
+  }
+  return res;
+}
+$('clr').onclick=async()=>{try{(await db()).close();_db=null;indexedDB.deleteDatabase('pdf-traductor');showAlert('Memoria de traducciones borrada.')}catch(e){}};
+
 // traducción de un documento completo
 async function translateDoc(d,label){
-  const from=$('from').value,to=$('to').value,e=$('engine').value,max=e==='mymemory'?1:2800;
+  const from=$('from').value,to=$('to').value,e=$('engine').value,single=e!=='claude'&&e!=='google',max=2800,t0=Date.now();
   const all=d.pages.flatMap((p,pi)=>p.blocks.map(b=>({b,pi})));
   const total=all.reduce((s,x)=>s+x.b.t.length,0)||1;
   let done=0,batch=[],size=0;
@@ -268,10 +338,10 @@ async function translateDoc(d,label){
     tr.forEach((t,k)=>batch[k].b.tr=t);batch=[];size=0;
   };
   for(const x of all){
-    if(e!=='mymemory'&&size+x.b.t.length>max)await flush();
+    if(!single&&size+x.b.t.length>max)await flush();
     batch.push(x);size+=x.b.t.length;done+=x.b.t.length;
-    if(e==='mymemory')await flush();
-    setProgress(`${label}: traduciendo página ${x.pi+1} de ${d.pages.length}…`,0.3+0.7*done/total);
+    if(single)await flush();
+    {const eta=done>300?(Date.now()-t0)/1000/done*(total-done):0;setProgress(`${label}: traduciendo página ${d.pages[x.pi].pn} (${x.pi+1} de ${d.pages.length})${eta>5?' · faltan ~'+fmt(eta):''}`,0.3+0.7*done/total)}
   }
   await flush();
 }
@@ -281,9 +351,11 @@ $('go').onclick=async()=>{
   hideAlert();cancelled=false;
   $('go').disabled=true;$('stop').classList.remove('hidden');
   const e=$('engine').value;
-  if(e!=='mymemory'){if($('remember').checked)store.set('pt_key_'+e,$('key').value.trim());else store.del('pt_key_'+e)}
+  if(e==='claude'||e==='google'){if($('remember').checked)store.set('pt_key_'+e,$('key').value.trim());else store.del('pt_key_'+e)}
   $('docs').innerHTML='';$('result').classList.add('hidden');docs=[];prog.n=files.length;
   try{
+    if($('from').value==='auto'&&(e==='local'||e==='chrome'))throw new Error('Con este motor elige el idioma original; no se detecta solo.');
+    if(e==='chrome')await getChrome($('from').value,$('to').value);
     for(let i=0;i<files.length;i++){
       prog.d=i;
       const label=files.length>1?`[${i+1}/${files.length}] ${files[i].name}`:files[i].name;
@@ -302,11 +374,11 @@ $('stop').onclick=()=>{cancelled=true};
 
 function renderDoc(d){
   const el=document.createElement('details');el.className='card';el.open=docs.length<=1;
-  el.innerHTML=`<summary><b>${esc(d.name)}</b> · ${d.pages.length} pág.</summary><div class="row" style="margin:12px 0"><button class="primary" data-f="layout">PDF con diseño original</button><button data-f="text">PDF solo texto</button><button data-f="docx">Word (.docx)</button><button data-f="txt">TXT</button></div><div class="pgs"></div>`;
-  el.querySelectorAll('button').forEach(b=>b.onclick=()=>download(d,b.dataset.f));
-  const box=el.querySelector('.pgs');
-  d.pages.forEach((p,i)=>{
-    const h=document.createElement('h3');h.textContent=`Página ${i+1}`;box.appendChild(h);
+  el.innerHTML=`<summary><b>${esc(d.name)}</b> · ${d.pages.length} pág.</summary><div class="row" style="margin:12px 0"><button class="primary" data-f="layout">PDF con diseño original</button><button data-f="text">PDF solo texto</button><button data-f="docx">Word (.docx)</button><button data-f="txt">TXT</button></div><div class="row" style="justify-content:space-between;margin-bottom:8px"><button data-n="-1">Anterior</button><span class="pl"></span><button data-n="1">Siguiente</button></div><div class="pgs"></div>`;
+  el.querySelectorAll('button[data-f]').forEach(b=>b.onclick=()=>download(d,b.dataset.f));
+  const box=el.querySelector('.pgs'),pl=el.querySelector('.pl');let cur=0;
+  const show=()=>{
+    const p=d.pages[cur];box.innerHTML='';pl.textContent=`Página ${p.pn} · ${cur+1} de ${d.pages.length}`;
     p.blocks.forEach(b=>{
       const r=document.createElement('div'),o=document.createElement('div'),t=document.createElement('textarea');
       r.className='row2';o.className='o';o.textContent=b.t;t.className='t';t.value=b.tr||'';
@@ -315,7 +387,9 @@ function renderDoc(d){
       t.setAttribute('aria-label','Traducción editable');
       r.append(o,t);box.appendChild(r);
     });
-  });
+  };
+  el.querySelectorAll('button[data-n]').forEach(b=>b.onclick=()=>{cur=Math.min(d.pages.length-1,Math.max(0,cur+ +b.dataset.n));show()});
+  show();
   $('docs').appendChild(el);$('result').classList.remove('hidden');
   $('zipBar').classList.toggle('hidden',docs.length<2);
   if(docs.length===1)el.scrollIntoView({behavior:'smooth'});
@@ -333,7 +407,7 @@ async function layoutPdf(d){
   const rtl=$('to').value==='ar';let doc=null;
   for(let i=0;i<d.pages.length;i++){
     setProgress(`Generando PDF: página ${i+1} de ${d.pages.length}…`);
-    const p=d.pages[i],S=2,c=await renderPage(await d.pdf.getPage(i+1),S),x=c.getContext('2d');
+    const p=d.pages[i],S=2,c=await renderPage(await d.pdf.getPage(p.pn),S),x=c.getContext('2d');
     x.textBaseline='top';x.direction=rtl?'rtl':'ltr';x.textAlign=rtl?'right':'left';
     p.blocks.forEach(b=>{
       const X=b.x*S,Y=b.y*S,W=b.w*S,H=b.h*S;
@@ -350,7 +424,7 @@ async function layoutPdf(d){
     });
     const o=p.w>p.h?'l':'p';
     if(!doc)doc=new jspdf.jsPDF({unit:'pt',format:[p.w,p.h],orientation:o,compress:true});else doc.addPage([p.w,p.h],o);
-    doc.addImage(c.toDataURL('image/jpeg',.85),'JPEG',0,0,p.w,p.h);
+    doc.addImage(c.toDataURL('image/jpeg',.85),'JPEG',0,0,p.w,p.h);c.width=c.height=0;
   }
   return doc.output('blob');
 }
@@ -378,7 +452,7 @@ function docxBlob(d,to){
 }
 async function makeFile(d,f){
   const to=$('to').value;
-  if(f==='txt')return[new Blob([d.pages.map((p,i)=>`--- Página ${i+1} ---\n\n`+p.blocks.map(trOf).join('\n\n')).join('\n\n')],{type:'text/plain;charset=utf-8'}),'txt'];
+  if(f==='txt')return[new Blob([d.pages.map((p,i)=>`--- Página ${p.pn} ---\n\n`+p.blocks.map(trOf).join('\n\n')).join('\n\n')],{type:'text/plain;charset=utf-8'}),'txt'];
   if(f==='docx')return[await docxBlob(d,to),'docx'];
   if(f==='text')return[textPdf(d,to),'pdf'];
   return[await layoutPdf(d),'pdf'];
